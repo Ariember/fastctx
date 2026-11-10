@@ -1,11 +1,10 @@
 //! Two-pass batch replacement with full blast-radius counting and per-file CAS commits.
+//! Modified for Ariember/fastctx: use the native output budget without shell status reservations.
 
 use super::document::TextDocument;
 use super::locks::{FilePathLock, PathIdentity};
 use super::{ReplaceRequest, ReplaceService, edit_token_budget, plural};
-use crate::budget::{
-    GLOBAL_TOKEN_BUDGET_ENV, assemble_text, estimate_tokens, tool_token_budget_for_required,
-};
+use crate::budget::{assemble_text, estimate_tokens};
 use crate::glob_filter::{GlobPatterns, PathGlobFilter};
 use crate::model::ToolResponse;
 use crate::skip_report::{SkipTally, terminal_with_skips};
@@ -944,18 +943,6 @@ fn render_report(
     if estimate_tokens(&output) <= budget {
         ToolResponse::text(output)
     } else {
-        let required = estimate_tokens(&output);
-        if let Ok(expanded) = tool_token_budget_for_required(GLOBAL_TOKEN_BUDGET_ENV, required)
-            && expanded.value > budget
-        {
-            return render_report(
-                groups,
-                terminal,
-                extra_notes,
-                expanded.value,
-                force_truncated,
-            );
-        }
         ToolResponse::error(format!(
             "FASTCTX_TOKEN_BUDGET={budget} is too small to return the required status note. Increase it and retry."
         ))

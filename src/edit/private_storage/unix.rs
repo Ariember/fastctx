@@ -1,4 +1,5 @@
 //! Unix private-directory creation and no-follow enforcement.
+//! Modified for Ariember/fastctx: retain edit-lock directory storage.
 
 use std::ffi::{CString, OsString};
 use std::fs::{self, File, OpenOptions};
@@ -7,28 +8,15 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-pub(super) fn runtime_component(component: &str) -> PathBuf {
-    resolve_runtime_component(
-        component,
-        std::env::var_os("XDG_RUNTIME_DIR"),
-        std::env::temp_dir(),
-    )
+pub(super) fn edit_lock_directory() -> PathBuf {
+    resolve_edit_lock_directory(std::env::var_os("XDG_RUNTIME_DIR"), std::env::temp_dir())
 }
 
-pub(super) fn short_control_center_directory() -> PathBuf {
-    let uid = unsafe { libc::geteuid() };
-    PathBuf::from("/tmp").join(format!("fastctx-engine-{uid}"))
-}
-
-fn resolve_runtime_component(
-    component: &str,
-    xdg_runtime_dir: Option<OsString>,
-    temp_dir: PathBuf,
-) -> PathBuf {
+fn resolve_edit_lock_directory(xdg_runtime_dir: Option<OsString>, temp_dir: PathBuf) -> PathBuf {
     if let Some(runtime) = xdg_runtime_dir {
         let runtime = PathBuf::from(runtime);
         if runtime.is_absolute() {
-            return runtime.join(format!("fastctx-{component}"));
+            return runtime.join("fastctx-edit-locks");
         }
     }
     let base = if temp_dir.is_absolute() {
@@ -37,7 +25,7 @@ fn resolve_runtime_component(
         PathBuf::from("/tmp")
     };
     let uid = unsafe { libc::geteuid() };
-    base.join(format!("fastctx-{component}-{uid}"))
+    base.join(format!("fastctx-edit-locks-{uid}"))
 }
 
 pub(super) fn ensure_private_directory(path: &Path, label: &str) -> Result<(), String> {
@@ -170,8 +158,6 @@ fn managed_chain(path: &Path) -> Vec<PathBuf> {
                 && parent.file_name().is_some_and(|name| name == "fastctx")
             {
                 Some(parent)
-            } else if ancestor.file_name().is_some_and(|name| name == ".fastctx") {
-                Some(ancestor)
             } else {
                 None
             }
@@ -198,7 +184,7 @@ pub(super) fn is_reparse_or_symlink(metadata: &fs::Metadata) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_private_directory, resolve_runtime_component};
+    use super::{ensure_private_directory, resolve_edit_lock_directory};
     use std::ffi::OsString;
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::path::PathBuf;
@@ -229,14 +215,14 @@ mod tests {
     #[test]
     fn existing_managed_chain_is_converged_to_owner_only() {
         let temp = tempfile::tempdir().unwrap();
-        let parent = temp.path().join(".fastctx");
-        let directory = parent.join("jobs");
+        let parent = temp.path().join("fastctx/runtime");
+        let directory = parent.join("edit-locks");
         std::fs::create_dir_all(&directory).unwrap();
         for managed in [&parent, &directory] {
             std::fs::set_permissions(managed, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
-        ensure_private_directory(&directory, "background job registry").unwrap();
+        ensure_private_directory(&directory, "edit-lock").unwrap();
 
         for managed in [parent, directory] {
             let mode = std::fs::metadata(managed).unwrap().permissions().mode() & 0o777;
@@ -251,13 +237,13 @@ mod tests {
         let outside = temp.path().join("outside");
         std::fs::create_dir(&home).unwrap();
         std::fs::create_dir(&outside).unwrap();
-        let anchor = home.join(".fastctx");
+        let anchor = home.join("fastctx");
         symlink(&outside, &anchor).unwrap();
 
         let error =
-            ensure_private_directory(&anchor.join("jobs"), "background job registry").unwrap_err();
+            ensure_private_directory(&anchor.join("runtime/edit-locks"), "edit-lock").unwrap_err();
         assert!(error.contains("not a private directory"), "{error}");
-        assert!(!outside.join("jobs").exists());
+        assert!(!outside.join("runtime").exists());
     }
 
     #[test]
@@ -294,8 +280,7 @@ mod tests {
 
     #[test]
     fn relative_runtime_environment_never_produces_a_relative_lock_path() {
-        let path = resolve_runtime_component(
-            "edit-locks",
+        let path = resolve_edit_lock_directory(
             Some(OsString::from("relative-xdg")),
             PathBuf::from("relative-temp"),
         );
@@ -305,8 +290,7 @@ mod tests {
 
     #[test]
     fn absolute_xdg_runtime_directory_is_used_without_an_architecture_split() {
-        let path = resolve_runtime_component(
-            "edit-locks",
+        let path = resolve_edit_lock_directory(
             Some(OsString::from("/run/user/1234")),
             PathBuf::from("/ignored"),
         );

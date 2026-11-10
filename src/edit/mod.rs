@@ -1,5 +1,7 @@
 //! Byte-preserving batch replacement with optimistic and cross-process write protection.
+//! Modified for Ariember/fastctx: use the native worker's fixed replacement size limit.
 
+mod atomic_write;
 mod document;
 mod locks;
 pub(crate) mod private_storage;
@@ -79,25 +81,9 @@ impl ReplaceService {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn shares_locks_with(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.path_locks, &other.path_locks)
-    }
-
-    /// Applies one regex plan across all candidates after a full blast-radius count.
+    /// Applies one regex plan after a full match count, limiting each file to 256 MiB.
     pub fn replace(&self, request: ReplaceRequest) -> ToolResponse {
-        self.replace_with_limit(
-            request,
-            crate::control::settings::DEFAULT_REPLACE_FILE_LIMIT_MIB as u64,
-        )
-    }
-
-    pub(crate) fn replace_with_limit(
-        &self,
-        request: ReplaceRequest,
-        max_file_size_mib: u64,
-    ) -> ToolResponse {
-        replace::replace(self, request, max_file_size_mib)
+        replace::replace(self, request, 256)
     }
 }
 

@@ -1,31 +1,24 @@
 # Contributing to FastCtx
 
-This contribution guide is maintained by fraternity-z for the independent
-FastCtx version designed for CodeyX, derived from yc-duan/fastctx. Bug reports,
-feature requests, and focused pull requests for this version are welcome.
+This guide is maintained by fraternity-z for the CodeyX native file-tool library derived from yc-duan/fastctx.
 
-## Reporting issues
-
-Open an issue at <https://github.com/fraternity-z/fastctx/issues>. For bugs, please
-include the platform, the FastCtx version, and steps to reproduce.
+Report issues and submit focused changes at <https://github.com/Ariember/fastctx/issues>. Include the platform, library revision, and steps to reproduce bugs.
 
 ## Development
 
-FastCtx is a single Rust crate. The usual loop:
+Keep changes focused on CodeyX's four native file tools and preserve their input schemas, output formats, cancellation behavior, and file-write safeguards.
 
 ```console
-cargo fmt
-cargo clippy --all-targets
-cargo test
+cargo fmt --all -- --check
+cargo check --locked --all-targets
+cargo test --locked --all-targets
+cargo build --locked --release --lib
 ```
 
-Please keep pull requests focused: one change per PR.
+For API changes, update the CodeyX sidecar and run its native tool tests against the changed library. CodeyX's pinned Git dependency must be updated before the changes reach a normal CodeyX build.
 
 ## License of contributions
 
 FastCtx is licensed under the Apache License 2.0.
 
-Unless you explicitly state otherwise, any contribution intentionally
-submitted for inclusion in FastCtx by you, as defined in the Apache-2.0
-license, shall be licensed as above, without any additional terms or
-conditions.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in FastCtx by you, as defined in the Apache-2.0 license, shall be licensed as above, without any additional terms or conditions. Preserve the applicable license, notices, and modification notices in changed upstream files.

@@ -1,15 +1,9 @@
-//! Text, image, PDF, and raw-byte dispatch for the file-inspection tool.
+//! Text, image, and raw-byte dispatch for the file-inspection tool.
+//! Modified for Ariember/fastctx: publish the file formats used by CodeyX.
 
 mod batch;
 mod hex_file;
 mod image_file;
-#[cfg(feature = "pdf")]
-mod pdf;
-#[cfg(not(feature = "pdf"))]
-#[path = "pdf_disabled.rs"]
-mod pdf;
-#[cfg(feature = "pdf")]
-mod pdf_engine;
 mod text_file;
 
 use crate::binary::detect_binary_type;
@@ -45,7 +39,7 @@ const TOTAL_COUNT_SIZE_LIMIT: u64 = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 enum ViewMode {
-    /// Select the text, image, or PDF channel from the file type.
+    /// Select the text or image channel from the file type.
     #[default]
     Auto,
     /// Return a paged hexadecimal dump of the raw bytes.
@@ -65,7 +59,7 @@ pub struct ReadRequest {
     /// 1-32 text ranges in one call. Repeat a path for distinct ranges, each with its own
     /// offset/limit, and freely mix ranges from multiple files. Each entry behaves like its
     /// own single-file text request; results stay in request order. Mutually exclusive with
-    /// file_path and with the top-level offset/encoding/pages/pdf_mode/view parameters.
+    /// file_path and with the top-level offset/encoding/view parameters.
     #[schemars(length(min = 1, max = 32))]
     pub files: Option<Vec<BatchReadEntry>>,
     /// The 1-based line number to start reading from. Use for paging through large files.
@@ -76,11 +70,6 @@ pub struct ReadRequest {
     /// decide.
     #[schemars(range(min = 1))]
     pub limit: Option<usize>,
-    /// Page range for PDF files, e.g. "1-5", "3", "10-20". Max 20 pages per call. Required in text mode for PDFs with more than 10 pages.
-    pub pages: Option<String>,
-    /// PDF only: "text" (default) returns the selected pages' text layer; "image" returns each selected page rendered as a PNG image.
-    #[schemars(with = "Option<pdf::PdfMode>")]
-    pub pdf_mode: Option<String>,
     /// Text files only. Known source encoding as a WHATWG label, e.g. "gbk", "shift_jis", "big5", "euc-kr", "windows-1252", "utf-16le", plus "utf-32le"/"utf-32be". Selects how source bytes are decoded; output is always UTF-8. Omit for auto-detection; set it when you know the source encoding or the tool reports an ambiguous or undecodable encoding.
     pub encoding: Option<String>,
     /// "auto" (default) picks the channel by file type; "hex" returns a paged hex dump of the raw bytes of any file — the way to inspect binary files.
@@ -108,7 +97,7 @@ pub struct BatchReadEntry {
     pub encoding: Option<String>,
 }
 
-/// Reads text, images, PDFs, or raw bytes and surfaces every expected failure explicitly.
+/// Reads text, images, or raw bytes and surfaces every expected failure explicitly.
 pub fn read_file(request: ReadRequest) -> ToolResponse {
     match (request.file_path.as_deref(), request.files.as_ref()) {
         (Some(_), Some(_)) | (None, None) => {
@@ -160,16 +149,10 @@ pub fn read_file(request: ReadRequest) -> ToolResponse {
         Err(message) => return ToolResponse::error(message),
     };
     if view == ViewMode::Hex {
-        for (parameter, present) in [
-            ("pdf_mode", request.pdf_mode.is_some()),
-            ("pages", request.pages.is_some()),
-            ("encoding", request.encoding.is_some()),
-        ] {
-            if present {
-                return ToolResponse::error(format!(
-                    "The {parameter} parameter cannot be combined with view=\"hex\"."
-                ));
-            }
+        if request.encoding.is_some() {
+            return ToolResponse::error(
+                "The encoding parameter cannot be combined with view=\"hex\".",
+            );
         }
         let budget = match tool_token_budget(READ_TOKEN_BUDGET_ENV) {
             Ok(budget) => budget,
@@ -178,30 +161,6 @@ pub fn read_file(request: ReadRequest) -> ToolResponse {
         return hex_file::read_hex_file(&path, request.offset, request.limit, budget);
     }
 
-    if pdf::is_pdf(&path, &prefix) {
-        if request.encoding.is_some() {
-            return ToolResponse::error("The encoding parameter only applies to text files.");
-        }
-        let mode = match pdf::parse_pdf_mode(request.pdf_mode.as_deref()) {
-            Ok(mode) => mode,
-            Err(message) => return ToolResponse::error(message),
-        };
-        let budget = if mode == pdf::PdfMode::Text {
-            match tool_token_budget(READ_TOKEN_BUDGET_ENV) {
-                Ok(budget) => Some(budget),
-                Err(message) => return ToolResponse::error(message),
-            }
-        } else {
-            None
-        };
-        return pdf::read_pdf(&path, request.pages.as_deref(), mode, budget);
-    }
-    if request.pages.is_some() {
-        return ToolResponse::error("The pages parameter only applies to PDF files.");
-    }
-    if request.pdf_mode.is_some() {
-        return ToolResponse::error("The pdf_mode parameter only applies to PDF files.");
-    }
     if image_file::detect_image_mime(&path, &prefix).is_some() {
         if request.encoding.is_some() {
             return ToolResponse::error("The encoding parameter only applies to text files.");

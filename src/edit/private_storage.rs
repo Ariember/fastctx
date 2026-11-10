@@ -1,4 +1,5 @@
-//! User-private storage for edit locks and other process-shared runtime state.
+//! User-private storage for process-shared edit locks.
+//! Modified for Ariember/fastctx: retain storage for the native file engine.
 
 use std::fs::{self, File, OpenOptions};
 use std::path::{Component, Path, PathBuf};
@@ -9,28 +10,19 @@ mod unix;
 mod windows;
 
 pub(crate) fn edit_lock_directory() -> PathBuf {
-    runtime_component("edit-locks")
+    #[cfg(unix)]
+    {
+        unix::edit_lock_directory()
+    }
+    #[cfg(windows)]
+    {
+        windows::edit_lock_directory()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        std::env::temp_dir().join("fastctx-edit-locks")
+    }
 }
-
-pub(crate) fn job_control_directory() -> PathBuf {
-    runtime_component("job-control")
-}
-
-pub(crate) fn update_check_directory() -> PathBuf {
-    runtime_component("update-check")
-}
-
-pub(crate) fn control_center_directory() -> PathBuf {
-    runtime_component("engine")
-}
-
-#[cfg(unix)]
-pub(crate) fn short_control_center_directory() -> PathBuf {
-    unix::short_control_center_directory()
-}
-
-#[cfg(windows)]
-pub(crate) use windows::PrivateSecurityDescriptor;
 
 pub(crate) fn ensure_private_directory(path: &Path, label: &str) -> Result<(), String> {
     validate_private_directory_path(path, label)?;
@@ -106,21 +98,6 @@ pub(crate) fn open_lock_file(path: &Path, label: &str) -> Result<File, String> {
     })?;
     verify_open_file(&file, path, label)?;
     Ok(file)
-}
-
-fn runtime_component(component: &str) -> PathBuf {
-    #[cfg(unix)]
-    {
-        unix::runtime_component(component)
-    }
-    #[cfg(windows)]
-    {
-        windows::runtime_component(component)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        std::env::temp_dir().join(format!("fastctx-{component}"))
-    }
 }
 
 pub(super) fn verify_directory(path: &Path, label: &str) -> Result<(), String> {

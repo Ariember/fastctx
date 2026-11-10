@@ -1,10 +1,11 @@
+//! Modified for CodeyX: validate budgets and pagination through local file tools.
+
 mod common;
 
-use common::{McpSession, glob_files, grep_files, mcp_text, normalized, text, write};
+use common::{call_tool, glob_files, grep_files, normalized, text, tool_text, write};
 use fastctx::glob_tool::{FilterMode, GlobRequest, SortMode};
 use fastctx::grep_tool::{GrepRequest, OutputMode};
 use fastctx::read_tool::{BatchReadEntry, ReadRequest, read_file};
-use std::process::Command;
 
 #[test]
 fn independent_o200k_oracle_keeps_high_entropy_outputs_below_the_budget() {
@@ -37,21 +38,9 @@ fn independent_o200k_oracle_keeps_high_entropy_outputs_below_the_budget() {
         );
     }
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fastctx"));
-    // HOME isolation keeps the developer's real Codex profile (and its provider guard, which
-    // rewrites budget variables) out of this session's environment.
-    command
-        .args(["serve", "--enable-shell"])
-        .env("HOME", temp.path())
-        .env("USERPROFILE", temp.path())
-        .env("FASTCTX_TOKEN_BUDGET", BUDGET.to_string())
-        .env("FASTCTX_READ_TOKEN_BUDGET", BUDGET.to_string())
-        .env("FASTCTX_GREP_TOKEN_BUDGET", BUDGET.to_string())
-        .env("FASTCTX_GLOB_TOKEN_BUDGET", BUDGET.to_string())
-        .env("FASTCTX_RUN_TOKEN_BUDGET", BUDGET.to_string());
-    let mut session = McpSession::start(command);
-
-    let batch_response = session.call(
+    let batch_response = call_tool(
+        temp.path(),
+        BUDGET,
         "inspect_local_file",
         serde_json::json!({
             "files": [
@@ -63,11 +52,15 @@ fn independent_o200k_oracle_keeps_high_entropy_outputs_below_the_budget() {
     );
 
     let cases = [
-        session.call(
+        call_tool(
+            temp.path(),
+            BUDGET,
             "inspect_local_file",
             serde_json::json!({"file_path": normalized(&source), "limit": 2000}),
         ),
-        session.call(
+        call_tool(
+            temp.path(),
+            BUDGET,
             "grep",
             serde_json::json!({
                 "pattern": "HIT",
@@ -76,7 +69,9 @@ fn independent_o200k_oracle_keeps_high_entropy_outputs_below_the_budget() {
                 "head_limit": 0
             }),
         ),
-        session.call(
+        call_tool(
+            temp.path(),
+            BUDGET,
             "glob",
             serde_json::json!({
                 "pattern": "**/*.txt",
@@ -85,19 +80,12 @@ fn independent_o200k_oracle_keeps_high_entropy_outputs_below_the_budget() {
                 "limit": 1000
             }),
         ),
-        session.call(
-            "run",
-            serde_json::json!({
-                "command": "for ((i=0; i<400; i++)); do printf 'HIT !@#%%^&*()[]{} <> /\\ | emoji=😀🚀 combining=é %04d\\n' \"$i\"; done",
-                "login_shell": false
-            }),
-        ),
         batch_response.clone(),
     ];
 
     for response in &cases {
-        assert_eq!(response["result"]["isError"], false, "{response}");
-        let output = mcp_text(response);
+        assert_eq!(response["isError"], false, "{response}");
+        let output = tool_text(response);
         let oracle_tokens = tiktoken_rs::o200k_base_singleton()
             .encode_ordinary(output)
             .len();
@@ -113,7 +101,7 @@ fn independent_o200k_oracle_keeps_high_entropy_outputs_below_the_budget() {
         );
     }
 
-    let batch_output = mcp_text(&batch_response);
+    let batch_output = tool_text(&batch_response);
     let (batch_body, batch_terminal) = split_terminal(batch_output);
     assert!(
         batch_body.starts_with(&format!("=== {} (lines 1-", normalized(&source))),
@@ -142,12 +130,10 @@ fn independent_o200k_oracle_keeps_high_entropy_outputs_below_the_budget() {
     assert_eq!(pending[0]["encoding"], "utf-8");
     assert_eq!(pending[1]["path"], normalized(&batch_second));
     assert_eq!(pending[2]["path"], normalized(&batch_third));
-
-    assert!(session.close().success());
 }
 
 #[test]
-fn stdio_grep_and_glob_errors_obey_tiny_budgets_with_an_independent_oracle() {
+fn grep_and_glob_errors_obey_tiny_budgets_with_an_independent_oracle() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("source.txt");
     write(&source, b"hit\n");
@@ -155,26 +141,22 @@ fn stdio_grep_and_glob_errors_obey_tiny_budgets_with_an_independent_oracle() {
     let tokenizer = tiktoken_rs::o200k_base_singleton();
 
     for budget in [1_usize, 2] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_fastctx"));
-        command
-            .arg("serve")
-            .env("HOME", temp.path())
-            .env("USERPROFILE", temp.path())
-            .env("FASTCTX_TOKEN_BUDGET", budget.to_string())
-            .env("FASTCTX_GREP_TOKEN_BUDGET", budget.to_string())
-            .env("FASTCTX_GLOB_TOKEN_BUDGET", budget.to_string());
-        let mut session = McpSession::start(command);
-
         let responses = [
-            session.call(
+            call_tool(
+                temp.path(),
+                budget,
                 "grep",
                 serde_json::json!({"pattern": "hit", "path": normalized(&missing)}),
             ),
-            session.call(
+            call_tool(
+                temp.path(),
+                budget,
                 "grep",
                 serde_json::json!({"pattern": "[", "path": normalized(&source)}),
             ),
-            session.call(
+            call_tool(
+                temp.path(),
+                budget,
                 "grep",
                 serde_json::json!({
                     "pattern": "hit",
@@ -182,7 +164,9 @@ fn stdio_grep_and_glob_errors_obey_tiny_budgets_with_an_independent_oracle() {
                     "encoding": "not-a-real-encoding"
                 }),
             ),
-            session.call(
+            call_tool(
+                temp.path(),
+                budget,
                 "grep",
                 serde_json::json!({
                     "pattern": "hit",
@@ -190,15 +174,21 @@ fn stdio_grep_and_glob_errors_obey_tiny_budgets_with_an_independent_oracle() {
                     "output_mode": "content"
                 }),
             ),
-            session.call(
+            call_tool(
+                temp.path(),
+                budget,
                 "glob",
                 serde_json::json!({"pattern": "**/*", "path": normalized(&missing)}),
             ),
-            session.call(
+            call_tool(
+                temp.path(),
+                budget,
                 "glob",
                 serde_json::json!({"pattern": "[", "path": normalized(temp.path())}),
             ),
-            session.call(
+            call_tool(
+                temp.path(),
+                budget,
                 "glob",
                 serde_json::json!({
                     "pattern": "**/*.txt",
@@ -209,15 +199,14 @@ fn stdio_grep_and_glob_errors_obey_tiny_budgets_with_an_independent_oracle() {
         ];
 
         for response in responses {
-            assert_eq!(response["result"]["isError"], true, "{response}");
-            let output = mcp_text(&response);
+            assert_eq!(response["isError"], true, "{response}");
+            let output = tool_text(&response);
             let tokens = tokenizer.encode_ordinary(output).len();
             assert!(
                 tokens <= budget,
                 "independent oracle counted {tokens} tokens over budget {budget}: {output:?}"
             );
         }
-        assert!(session.close().success());
     }
 }
 
@@ -241,8 +230,6 @@ fn read_offset_pages_reassemble_without_duplicates_or_gaps_across_a_matrix() {
                     files: None,
                     offset: Some(offset),
                     limit: Some(page_width),
-                    pages: None,
-                    pdf_mode: None,
                     encoding: None,
                     view: None,
                 }));
@@ -310,8 +297,6 @@ fn batch_read_continuation_chain_matches_independent_per_file_line_oracles() {
                 files: Some(pending),
                 offset: None,
                 limit: None,
-                pages: None,
-                pdf_mode: None,
                 encoding: None,
                 view: None,
             }));

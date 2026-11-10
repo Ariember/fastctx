@@ -1,7 +1,11 @@
 //! Magic-byte recognition for common binary formats shared by read and grep.
+//! Modified for Ariember/fastctx: identify PDFs as binary input for text tools.
 
 /// Returns the contract file type used in binary errors, declining to guess when no signature matches.
 pub(crate) fn detect_binary_type(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"%PDF") {
+        return Some("a PDF document");
+    }
     if bytes.starts_with(b"PK\x03\x04") {
         return Some("a ZIP archive");
     }
@@ -50,6 +54,7 @@ mod tests {
     #[test]
     fn recognizes_each_contract_signature_without_extension_help() {
         let cases: &[(&[u8], &str)] = &[
+            (b"%PDF-1.7", "a PDF document"),
             (b"PK\x03\x04", "a ZIP archive"),
             (b"\x1F\x8B", "gzip data"),
             (b"\x37\x7A\xBC\xAF\x27\x1C", "7-Zip data"),

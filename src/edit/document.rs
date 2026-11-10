@@ -1,6 +1,7 @@
 //! Byte-preserving editable text snapshots, line anchors, CAS, and atomic commit.
+//! Modified for Ariember/fastctx: use the file engine's atomic write helper.
 
-use crate::control::transaction;
+use super::atomic_write;
 use crate::encoding::{EncodingDecision, ValidatedFileEncoding};
 use crate::paths::{display_path, io_error_message, missing_file_message, parse_input_path};
 use sha2::{Digest, Sha256};
@@ -150,7 +151,7 @@ impl TextDocument {
             eol,
         } = logical_view(editable);
         let trailing_newline = logical.ends_with('\n');
-        let unix_mode = transaction::existing_unix_mode(&target_path);
+        let unix_mode = atomic_write::existing_unix_mode(&target_path);
         Ok(Self {
             requested_path,
             target_path,
@@ -202,7 +203,7 @@ impl TextDocument {
         }
         reject_hard_link(&self.target_path)?;
         drop(std::mem::take(&mut self.raw));
-        transaction::atomic_replace(&self.target_path, new_bytes, self.unix_mode, false)
+        atomic_write::atomic_replace(&self.target_path, new_bytes, self.unix_mode)
     }
 
     pub(crate) fn encode_for_target(&self, logical_text: &str) -> Result<Vec<u8>, String> {

@@ -1,6 +1,7 @@
 //! Request-ordered text batching with one shared token budget and exact continuations.
+//! Modified for Ariember/fastctx: remove unsupported PDF parameters.
 
-use super::{BatchReadEntry, ReadRequest, image_file, pdf, text_file};
+use super::{BatchReadEntry, ReadRequest, image_file, text_file};
 use crate::binary::detect_binary_type;
 use crate::budget::{READ_TOKEN_BUDGET_ENV, TokenBudget, estimate_tokens, tool_token_budget};
 use crate::encoding::canonical_encoding_label;
@@ -66,16 +67,10 @@ pub(super) fn read_text_files(mut request: ReadRequest) -> ToolResponse {
             entry.limit.get_or_insert(default_limit);
         }
     }
-    for (parameter, present) in [
-        ("pages", request.pages.is_some()),
-        ("pdf_mode", request.pdf_mode.is_some()),
-        ("view", request.view.is_some()),
-    ] {
-        if present {
-            return ToolResponse::error(format!(
-                "The {parameter} parameter cannot be combined with files; PDFs, images, and hex view are single-file reads."
-            ));
-        }
+    if request.view.is_some() {
+        return ToolResponse::error(
+            "The view parameter cannot be combined with files; images and hex view are single-file reads.",
+        );
     }
     let entries = match validate_entries(entries) {
         Ok(entries) => entries,
@@ -245,15 +240,6 @@ fn prepare_entry(entry: &BatchReadEntry, collection_budget: usize) -> PreparedEn
         return PreparedEntry {
             path: path_display,
             outcome: PreparedOutcome::Message(io_error_message(&path, &error)),
-        };
-    }
-    if pdf::is_pdf(&path, &prefix) {
-        return PreparedEntry {
-            path: path_display,
-            outcome: PreparedOutcome::Message(
-                "PDF files cannot be included in files. Read this file separately with file_path and optional pages/pdf_mode."
-                    .to_string(),
-            ),
         };
     }
     if image_file::detect_image_mime(&path, &prefix).is_some() {

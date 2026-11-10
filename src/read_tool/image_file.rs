@@ -1,4 +1,5 @@
-//! Image magic-byte detection and MCP image-content construction for read.
+//! Image magic-byte detection and native image result construction.
+//! Modified for Ariember/fastctx: return images using the host detail setting.
 
 use crate::model::{ToolContent, ToolResponse};
 use crate::paths::io_error_message;
@@ -74,7 +75,6 @@ pub(super) fn read_image(path: &Path) -> ToolResponse {
         content: vec![ToolContent::Image {
             data: base64::engine::general_purpose::STANDARD.encode(bytes),
             mime_type: mime_type.to_string(),
-            detail: None,
         }],
         is_error: false,
     }

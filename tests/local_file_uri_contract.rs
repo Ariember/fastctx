@@ -1,3 +1,4 @@
+// Modified for Ariember/fastctx: use the native read request.
 use fastctx::ToolContent;
 use fastctx::read_tool::{ReadRequest, read_file};
 
@@ -8,8 +9,6 @@ fn a_drive_shaped_file_uri_cannot_discard_its_remote_authority() {
         files: None,
         offset: None,
         limit: None,
-        pages: None,
-        pdf_mode: None,
         encoding: None,
         view: None,
     });

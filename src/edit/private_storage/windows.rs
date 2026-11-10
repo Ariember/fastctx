@@ -1,11 +1,12 @@
 //! Windows private-directory ACLs and reparse-point enforcement.
+//! Modified for Ariember/fastctx: retain edit-lock directory storage.
 
 use std::fs::{self, OpenOptions};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
 
-pub(super) fn runtime_component(component: &str) -> PathBuf {
+pub(super) fn edit_lock_directory() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
@@ -16,7 +17,7 @@ pub(super) fn runtime_component(component: &str) -> PathBuf {
                 .map(|path| path.join("AppData").join("Local"))
         })
         .unwrap_or_else(std::env::temp_dir);
-    base.join("fastctx").join("runtime").join(component)
+    base.join("fastctx").join("runtime").join("edit-locks")
 }
 
 pub(super) fn ensure_private_directory(path: &Path, label: &str) -> Result<(), String> {
@@ -48,8 +49,6 @@ fn managed_chain(path: &Path) -> Vec<PathBuf> {
             let parent = ancestor.parent()?;
             if file_name_eq(ancestor, "runtime") && file_name_eq(parent, "fastctx") {
                 Some(parent)
-            } else if file_name_eq(ancestor, ".fastctx") {
-                Some(ancestor)
             } else {
                 None
             }
@@ -151,45 +150,10 @@ struct PrivateAcl {
     dacl: *mut windows_sys::Win32::Security::ACL,
 }
 
-/// Owner-and-System descriptor used while creating one private named-pipe instance.
-pub(crate) struct PrivateSecurityDescriptor {
-    descriptor: windows_sys::Win32::Security::PSECURITY_DESCRIPTOR,
-}
-
-impl PrivateSecurityDescriptor {
-    pub(crate) fn new() -> Result<Self, String> {
-        let user_sid = current_process_user_sid_string()?;
-        let descriptor = private_descriptor(
-            Path::new(r"\\.\pipe\fastctx-engine"),
-            "control-center IPC",
-            &user_sid,
-            false,
-        )?;
-        Ok(Self { descriptor })
-    }
-
-    pub(crate) fn security_attributes(&self) -> windows_sys::Win32::Security::SECURITY_ATTRIBUTES {
-        windows_sys::Win32::Security::SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<windows_sys::Win32::Security::SECURITY_ATTRIBUTES>()
-                as u32,
-            lpSecurityDescriptor: self.descriptor,
-            bInheritHandle: 0,
-        }
-    }
-}
-
-impl Drop for PrivateSecurityDescriptor {
-    fn drop(&mut self) {
-        unsafe {
-            windows_sys::Win32::Foundation::LocalFree(self.descriptor);
-        }
-    }
-}
-
 impl PrivateAcl {
     fn new(path: &Path, label: &str, user_sid: &str) -> Result<Self, String> {
         use windows_sys::Win32::Security::GetSecurityDescriptorDacl;
-        let descriptor = private_descriptor(path, label, user_sid, true)?;
+        let descriptor = private_descriptor(path, label, user_sid)?;
 
         let mut present = 0;
         let mut defaulted = 0;
@@ -269,7 +233,6 @@ fn private_descriptor(
     path: &Path,
     label: &str,
     user_sid: &str,
-    inheritable: bool,
 ) -> Result<windows_sys::Win32::Security::PSECURITY_DESCRIPTOR, String> {
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -277,14 +240,12 @@ fn private_descriptor(
 
     // 2026-07-22: TokenUser is stable across UAC's elevated and filtered tokens;
     // Owner Rights can resolve to Administrators and lock the filtered token out.
-    let ace_flags = if inheritable { "OICI" } else { "" };
-    let rights = if inheritable { "FA" } else { "GA" };
     let system_ace = if user_sid.eq_ignore_ascii_case("S-1-5-18") {
         String::new()
     } else {
-        format!("(A;{ace_flags};{rights};;;SY)")
+        "(A;OICI;FA;;;SY)".to_string()
     };
-    let descriptor_text = format!("D:P(A;{ace_flags};{rights};;;{user_sid}){system_ace}")
+    let descriptor_text = format!("D:P(A;OICI;FA;;;{user_sid}){system_ace}")
         .encode_utf16()
         .chain(Some(0))
         .collect::<Vec<_>>();
@@ -674,29 +635,19 @@ mod tests {
     }
 
     #[test]
-    fn generic_private_storage_creates_missing_parent_chain_privately() {
-        let temp = tempfile::tempdir().unwrap();
-        let parent = temp.path().join(".fastctx");
-        let directory = parent.join("jobs");
-        ensure_private_directory(&directory, "background job registry").unwrap();
-        assert_private_acl(&parent);
-        assert_private_acl(&directory);
-    }
-
-    #[test]
     fn managed_chain_rejects_a_reparse_anchor_before_creating_children() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
         let outside = temp.path().join("outside");
         std::fs::create_dir(&home).unwrap();
         std::fs::create_dir(&outside).unwrap();
-        let anchor = home.join(".fastctx");
+        let anchor = home.join("fastctx");
         create_junction(&outside, &anchor);
 
-        let directory = anchor.join("jobs");
-        let error = ensure_private_directory(&directory, "background job registry").unwrap_err();
+        let directory = anchor.join("runtime/edit-locks");
+        let error = ensure_private_directory(&directory, "edit-lock").unwrap_err();
         assert!(error.contains("not a private directory"), "{error}");
-        assert!(!outside.join("jobs").exists());
+        assert!(!outside.join("runtime").exists());
         std::fs::remove_dir(anchor).unwrap();
     }
 
