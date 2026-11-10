@@ -1,5 +1,5 @@
 //! Strict incremental decoding, line collection, and budget closure for text reads.
-//! Modified for fraternity-z/fastctx: skip per-character work outside requested line windows.
+//! Modified for Ariember/fastctx: skip per-character work outside requested line windows.
 
 use super::{
     MAX_LINE_CHARS, TOTAL_COUNT_SIZE_LIMIT, UNBOUNDED_LINE_LIMIT, binary_error,
