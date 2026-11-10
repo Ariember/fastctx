@@ -42,8 +42,8 @@ struct Issue {
 }
 
 #[derive(Debug)]
-struct ReportGroup {
-    lines: Vec<String>,
+pub(super) struct ReportGroup {
+    pub(super) lines: Vec<String>,
 }
 
 pub(super) fn replace(
@@ -884,7 +884,7 @@ fn downgrade_if_unreachable(terminal: String, unreachable: usize) -> String {
     terminal
 }
 
-fn render_report(
+pub(super) fn render_report(
     groups: &[ReportGroup],
     terminal: &str,
     extra_notes: &[String],
@@ -974,7 +974,7 @@ fn fallback_note(analyzed: &[AnalyzedFile], encoding: Option<&str>) -> Vec<Strin
 fn append_terminal_clause(terminal: &str, clause: &str) -> String {
     let stem = terminal
         .strip_suffix(".)")
-        .expect("replace terminal notes always end with .)");
+        .expect("edit terminal notes always end with .)");
     format!("{stem}; {clause}.)")
 }
 

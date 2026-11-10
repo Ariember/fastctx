@@ -32,7 +32,7 @@ pub struct FastCtxServer {
 }
 
 impl FastCtxServer {
-    /// Creates the four native file tools with the worker's cwd and environment.
+    /// Creates the native file tools with the worker's cwd and environment.
     pub fn new() -> Self {
         Self::with_executor(GrepGlobExecutor::shared())
     }

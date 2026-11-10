@@ -6,7 +6,7 @@ Report issues and submit focused changes at <https://github.com/Ariember/fastctx
 
 ## Development
 
-Keep changes focused on CodeyX's four native file tools and preserve their input schemas, output formats, cancellation behavior, and file-write safeguards.
+Keep changes focused on CodeyX's native file tools and preserve their input schemas, output formats, cancellation behavior, and file-write safeguards.
 
 ```console
 cargo fmt --all -- --check

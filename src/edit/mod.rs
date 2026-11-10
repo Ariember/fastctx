@@ -1,8 +1,9 @@
-//! Byte-preserving batch replacement with optimistic and cross-process write protection.
+//! File mutations with byte-preserving replacement and shared write protection.
 //! Modified for Ariember/fastctx: use the native worker's fixed replacement size limit.
 
 mod atomic_write;
 mod document;
+mod filesystem;
 mod locks;
 pub(crate) mod private_storage;
 mod replace;
@@ -15,6 +16,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
+
+pub use filesystem::{CreateFileRequest, DeleteRequest, MoveRequest};
 
 /// Parameters for deterministic batch replacement across one file or a project tree.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -48,7 +51,7 @@ pub struct ReplaceRequest {
     pub fallback_encoding: Option<String>,
 }
 
-/// Stateful replacement service sharing in-process locks across concurrent calls.
+/// Stateful file mutation service sharing in-process locks across concurrent calls.
 #[derive(Clone, Debug)]
 pub struct ReplaceService {
     path_locks: Arc<PathLocks>,
@@ -84,6 +87,21 @@ impl ReplaceService {
     /// Applies one regex plan after a full match count, limiting each file to 256 MiB.
     pub fn replace(&self, request: ReplaceRequest) -> ToolResponse {
         replace::replace(self, request, 256)
+    }
+
+    /// Previews or deletes explicit files, empty directories, and symbolic links.
+    pub fn delete(&self, request: DeleteRequest) -> ToolResponse {
+        filesystem::delete(self, request)
+    }
+
+    /// Moves one entry within a filesystem without replacing an existing destination.
+    pub fn move_path(&self, request: MoveRequest) -> ToolResponse {
+        filesystem::move_path(self, request)
+    }
+
+    /// Creates a UTF-8 text file without replacing an existing entry.
+    pub fn create_file(&self, request: CreateFileRequest) -> ToolResponse {
+        filesystem::create_file(self, request)
     }
 }
 

@@ -1,26 +1,45 @@
-//! Modified for CodeyX: validate the four native file-tool definitions.
+//! Modified for CodeyX: validate the native file-tool definitions.
 
 use fastctx::server::FastCtxServer;
 use serde_json::Value;
 
 #[test]
-fn four_file_tools_publish_explicit_three_hint_annotations() {
+fn file_tools_publish_explicit_three_hint_annotations() {
     let tools = FastCtxServer::new().tool_definitions();
     let mut names = tools
         .iter()
         .map(|tool| tool.name.as_ref())
         .collect::<Vec<_>>();
     names.sort_unstable();
-    assert_eq!(names, ["glob", "grep", "inspect_local_file", "replace"]);
+    assert_eq!(
+        names,
+        [
+            "create_file",
+            "delete",
+            "glob",
+            "grep",
+            "inspect_local_file",
+            "move",
+            "replace"
+        ]
+    );
     for tool in &tools {
         let annotations = tool.annotations.as_ref().expect("annotations");
         assert_eq!(
             annotations.read_only_hint,
-            Some(tool.name != "replace"),
+            Some(matches!(
+                tool.name.as_ref(),
+                "glob" | "grep" | "inspect_local_file"
+            )),
             "{}",
             tool.name
         );
-        assert_eq!(annotations.destructive_hint, Some(false), "{}", tool.name);
+        assert_eq!(
+            annotations.destructive_hint,
+            Some(matches!(tool.name.as_ref(), "delete" | "move")),
+            "{}",
+            tool.name
+        );
         assert_eq!(annotations.open_world_hint, Some(false), "{}", tool.name);
     }
 }
@@ -226,6 +245,39 @@ fn replace_description_and_schema_preserve_the_file_editing_contract() {
         );
     }
     assert_positive_local_path_schema(&replace.input_schema["properties"]["path"]);
+}
+
+#[test]
+fn filesystem_tools_publish_explicit_mutation_parameters() {
+    let tools = FastCtxServer::new().tool_definitions();
+    for (name, required, paths) in [
+        ("delete", vec!["paths"], vec!["paths"]),
+        (
+            "move",
+            vec!["source", "destination"],
+            vec!["source", "destination"],
+        ),
+        ("create_file", vec!["path", "content"], vec!["path"]),
+    ] {
+        let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+        assert_eq!(tool.input_schema["required"], serde_json::json!(required));
+        for path in paths {
+            assert_positive_local_path_schema(&tool.input_schema["properties"][path]);
+        }
+    }
+    let delete = tools.iter().find(|tool| tool.name == "delete").unwrap();
+    assert_eq!(delete.input_schema["properties"]["paths"]["type"], "array");
+    assert_eq!(
+        delete.input_schema["properties"]["paths"]["items"]["type"],
+        "string"
+    );
+    assert!(
+        delete
+            .description
+            .as_deref()
+            .unwrap()
+            .contains("dry_run=true")
+    );
 }
 
 fn assert_positive_local_path_schema(schema: &Value) {
